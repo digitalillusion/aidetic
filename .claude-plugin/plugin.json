@@ -1,0 +1,6 @@
+{
+  "name": "aidetic",
+  "version": "0.1.0",
+  "license": "GPL-3.0-only",
+  "description": "aidetic's gate and ledger, run by a hooks module instead of settings hooks; the gate stays src/choice_gate.py"
+}

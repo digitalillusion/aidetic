@@ -1,0 +1,215 @@
+[
+ {"id": "s-q-en-pass", "task": "question", "lang": "en", "fails": false,
+  "why": "every real option has a case and its cost, the pick says why and when it is wrong, an Other option",
+  "input": {"question": {"question": "The nightly import fails on files over 2 GB. How should it handle them?", "header": "Big files", "multiSelect": false, "options": [
+   {"label": "Stream the file (Recommended)", "description": "Read the CSV in chunks instead of loading it whole. Hard to undo: nothing.",
+    "preview": "Next Monday the finance analyst drops a 3 GB export into the inbox folder (assumed: exports keep growing). The import reads it in 50 MB chunks and the dashboard is fresh by 7:00 (read: import/loader.py:88 loads the whole file today). Objection: chunking makes a bad row harder to locate; the error report keeps the row number. Hard to undo: nothing, the old loader stays one flag away.\nRecommended: it fixes the failure without changing the files anyone sends; wrong if the exports are about to be split at the source anyway."},
+   {"label": "Reject files over 2 GB", "description": "Fail fast with a clear message. Hard to undo: analysts learn to split exports by hand.",
+    "preview": "The analyst's 3 GB export is refused at 2:00 with \"file too large, split it\" (assumed: they read the morning e-mail). They split it by hand and re-run at 9:30; the dashboard is two hours late, and the habit of splitting sticks."},
+   {"label": "Other (describe in the note)", "description": "Your own answer.", "preview": "Your note replaces the options above."}]}}},
+
+ {"id": "s-q-en-no-cases", "task": "question", "lang": "en", "fails": true,
+  "why": "it recommends, but no option carries a case, a cost or an Other option",
+  "input": {"question": {"question": "Which queue should the worker use?", "header": "Queue", "multiSelect": false, "options": [
+   {"label": "Redis streams (Recommended)", "description": "Already deployed, simplest."},
+   {"label": "RabbitMQ", "description": "More features, one more service."}]}}},
+
+ {"id": "s-q-en-placeholder", "task": "question", "lang": "en", "fails": true,
+  "why": "the second option's preview is a placeholder, not a case",
+  "input": {"question": {"question": "Where should the feature flag for the new checkout live?", "header": "Flag", "multiSelect": false, "options": [
+   {"label": "In the config service (Recommended)", "description": "Flip it without a deploy. Hard to undo: nothing.",
+    "preview": "On launch day the support lead sees refunds spike at 11:00 (assumed: a refund bug slips through). The on-call engineer turns the flag off in the config service in a minute, without a deploy. Hard to undo: nothing.\nRecommended: it is the only way to turn it off without a deploy; wrong if the config service is itself being migrated that week."},
+   {"label": "In an environment variable", "description": "Simple, needs a restart to change. Hard to undo: nothing.", "preview": "Same as above, but slower."},
+   {"label": "Other (describe in the note)", "description": "Your own answer.", "preview": "Your note replaces the options above."}]}}},
+
+ {"id": "s-q-en-no-rec-cost-missing", "task": "question", "lang": "en", "fails": true,
+  "why": "no pick, but the options show cases, and one of them never says what it makes hard to undo",
+  "input": {"question": {"question": "How should we rename the `user_id` column?", "header": "Rename", "multiSelect": false, "options": [
+   {"label": "Rename in place", "description": "One migration, every reader updated in the same release. Hard to undo: the old name disappears from the database.",
+    "preview": "The data team's Thursday report queries `user_id` and fails the morning after the release (assumed: nobody told them). They fix the query in ten minutes, but the report is a day late."},
+   {"label": "Add the new column, drop the old later", "description": "Two releases, both names readable for a month.",
+    "preview": "The report keeps working for a month; the data team switches when they read the release note (assumed: they read it). A month later a second migration drops `user_id`."},
+   {"label": "Other (describe in the note)", "description": "Your own answer.", "preview": "Your note replaces the options above."}]}}},
+
+ {"id": "s-q-en-plain", "task": "question", "lang": "en", "fails": false,
+  "why": "a plain question: no pick and no cases, so the rule's form is not owed",
+  "input": {"question": {"question": "Which port should the dev server listen on?", "header": "Port", "multiSelect": false, "options": [
+   {"label": "3000", "description": "The framework's default."},
+   {"label": "8080", "description": "Matches the staging proxy."}]}}},
+
+ {"id": "s-q-it-pass", "task": "question", "lang": "it", "fails": false,
+  "why": "the full form, in Italian: cases, costs in the descriptions, the pick on its option with why and when it is wrong, Altro",
+  "input": {"question": {"question": "Il backup notturno dura sei ore e invade l'orario d'ufficio. Come lo accorciamo?", "header": "Backup", "multiSelect": false, "options": [
+   {"label": "Backup incrementale (consigliata)", "description": "Copia solo ciò che è cambiato dal giorno prima. Difficile da annullare: niente.",
+    "preview": "Lunedì alle 8:00 l'amministratrice di sistema trova il backup finito alle 2:30 invece che alle 9:00 (letto: backup/cron.sh:14 copia tutto ogni notte). Se serve un ripristino completo, ricomporre la catena richiede venti minuti in più. Obiezione: una catena rotta rende inutili i giorni successivi; il backup completo della domenica la riavvia.\nConsigliata: dimezza i tempi senza hardware nuovo; sbagliata se il disco del server di backup non regge la catena di sette giorni."},
+   {"label": "Disco più veloce", "description": "Stesso backup, su SSD. Difficile da annullare: la spesa, circa 2.000 euro (ipotesi: preventivo non ancora chiesto).",
+    "preview": "Il backup finisce alle 5:00; l'amministratrice non cambia nessuna procedura, ma il budget del trimestre perde la voce per il nuovo portatile del grafico (ipotesi: budget fisso)."},
+   {"label": "Altro (descrivi nella nota)", "description": "Una risposta tua.", "preview": "La tua nota sostituisce le opzioni."}]}}},
+
+ {"id": "s-q-it-summary-no-other", "task": "question", "lang": "it", "fails": true,
+  "why": "the pick is said in words in the description, the previews summarize instead of playing a case, and there is no free-text option",
+  "input": {"question": {"question": "Come gestiamo le traduzioni dell'app?", "header": "Traduzioni", "multiSelect": false, "options": [
+   {"label": "File JSON nel repository", "description": "La mia scelta: semplice e versionato.",
+    "preview": "Pro: semplice, versionato, nessun servizio esterno. Contro: i traduttori devono usare git."},
+   {"label": "Piattaforma di traduzione", "description": "Un servizio esterno sincronizzato con il repository.",
+    "preview": "Pro: interfaccia per i traduttori. Contro: costo mensile, un servizio in più."}]}}},
+
+ {"id": "s-q-ja-pass", "task": "question", "lang": "ja", "fails": false,
+  "why": "the full form, in Japanese",
+  "input": {"question": {"question": "ログの保存期間をどうしますか？", "header": "ログ保存", "multiSelect": false, "options": [
+   {"label": "30日に短縮（推奨）", "description": "ストレージ費用を約半分にする。元に戻しにくい: 31日より古いログは削除され復元できない。",
+    "preview": "来月、サポート担当者が45日前の障害を調べようとすると、ログはもう残っていない（想定: 障害調査の大半は2週間以内）。代わりに月次の集計だけが残る。異論: 監査で古いログを求められる可能性がある。\n推奨理由: 費用が半分になり、調査の大半は2週間以内に終わるため。誤りとなるのは、監査規程が90日の保存を求めている場合。"},
+   {"label": "90日のまま", "description": "変更なし。",
+    "preview": "サポート担当者はいつでも45日前のログを確認できる。ストレージ費用は今のまま毎月増え続ける（読んだ: billing/2026-09.csv）。元に戻しにくいもの: なし。"},
+   {"label": "その他（メモに記入）", "description": "自分の答えを書く。", "preview": "メモが選択肢の代わりになります。"}]}}},
+
+ {"id": "s-q-ja-cost-in-preview", "task": "question", "lang": "ja", "fails": true,
+  "why": "the recommended option names what it makes hard to undo only in its preview, which shows only while it is in focus",
+  "input": {"question": {"question": "古いAPIのバージョン1をどうしますか？", "header": "API v1", "multiSelect": false, "options": [
+   {"label": "今月で廃止（推奨）", "description": "v1のエンドポイントを削除する。",
+    "preview": "来週、v1を使い続けている取引先の担当者が404エラーを受け取り、連絡してくる（想定: 2社がまだ使用中）。元に戻しにくい: 削除後に取引先が別の仕組みへ移行してしまう。\n推奨理由: 保守の手間がなくなる。誤りとなるのは、取引先との契約でv1の提供が約束されている場合。"},
+   {"label": "半年延長", "description": "廃止を半年延ばす。元に戻しにくい: なし。",
+    "preview": "取引先は半年かけて移行し、その間チームはv1のバグ修正を続ける。元に戻しにくい: なし。"},
+   {"label": "その他（メモに記入）", "description": "自分の答えを書く。", "preview": "メモが選択肢の代わりになります。"}]}}},
+
+ {"id": "s-q-es-unreasoned", "task": "question", "lang": "es", "fails": true,
+  "why": "the recommended option plays out a case but never says why it is the pick or what would make it wrong",
+  "input": {"question": {"question": "¿Cómo desplegamos la nueva versión del servicio de pagos?", "header": "Despliegue", "multiSelect": false, "options": [
+   {"label": "Canary al 5% (recomendada)", "description": "Una fracción del tráfico primero. Difícil de deshacer: nada.",
+    "preview": "El martes a las 10:00 el responsable de guardia ve que el 5% de los pagos pasa por la versión nueva; a las 12:00 sube al 50% sin errores (supuesto: el tráfico del martes es normal)."},
+   {"label": "Todo de una vez", "description": "El 100% del tráfico a la vez. Difícil de deshacer: los pagos fallidos durante el error ya no se reintentan.",
+    "preview": "El martes a las 10:00 todo el tráfico pasa a la versión nueva; si hay un error, los clientes lo ven hasta que el responsable de guardia revierte (supuesto: diez minutos)."},
+   {"label": "Otra (descríbela en la nota)", "description": "Tu propia respuesta.", "preview": "Tu nota reemplaza las opciones."}]}}},
+
+ {"id": "s-q-de-plain", "task": "question", "lang": "de", "fails": false,
+  "why": "a plain question in German: no pick and no cases",
+  "input": {"question": {"question": "Welches Datumsformat soll der Export verwenden?", "header": "Datum", "multiSelect": false, "options": [
+   {"label": "ISO 8601", "description": "2026-10-26"},
+   {"label": "Deutsch", "description": "26.10.2026"}]}}},
+
+ {"id": "s-q-fr-no-other", "task": "question", "lang": "fr", "fails": true,
+  "why": "complete except for the free-text option",
+  "input": {"question": {"question": "Le test d'intégration échoue une fois sur dix. Que faisons-nous ?", "header": "Test instable", "multiSelect": false, "options": [
+   {"label": "Corriger l'horloge simulée (recommandée)", "description": "Remplacer l'heure réelle par une horloge contrôlée. Difficile à annuler : rien.",
+    "preview": "Jeudi, la développeuse qui ouvre une demande de fusion voit la CI verte du premier coup au lieu de relancer deux fois (lu : tests/test_billing.py:41 appelle l'heure réelle). Objection : une demi-journée de travail.\nRecommandée : elle supprime la cause ; fausse si l'échec vient en réalité du réseau de la CI."},
+   {"label": "Relancer automatiquement", "description": "Deux tentatives en CI. Difficile à annuler : l'habitude d'ignorer les échecs intermittents.",
+    "preview": "La CI passe au deuxième essai ; trois mois plus tard, un vrai bug de date passe inaperçu parce que l'équipe a appris à ignorer un premier échec (supposé)."}]}}},
+
+ {"id": "s-r-en-pick", "task": "reply", "lang": "en", "fails": true,
+  "why": "two courses still open, and the reply names the one it would take",
+  "input": {"reply": "The flaky test comes from the clock: `test_invoice_due` reads the real time. Two ways out: retry it in CI, or inject a fixed clock. I'd go with the fixed clock, since a retry only hides it. Want me to make that change?"}},
+
+ {"id": "s-r-en-report", "task": "reply", "lang": "en", "fails": false,
+  "why": "a report of work done; the choice in it was already made and carried out",
+  "input": {"reply": "Done. I kept the in-memory cache rather than adding Redis, since the data fits in 40 MB; the benchmark went from 310 ms to 45 ms and all 212 tests pass."}},
+
+ {"id": "s-r-en-announce", "task": "reply", "lang": "en", "fails": false,
+  "why": "announces the next step without leaving a choice to the user",
+  "input": {"reply": "The migration is written. Next I'll run it against the staging copy and then update the API docs."}},
+
+ {"id": "s-r-en-drafted", "task": "reply", "lang": "en", "fails": false,
+  "why": "the recommendation is inside a text drafted for someone else, not a pick put to the user",
+  "input": {"reply": "Here is the draft for the team channel:\n\n> Hi all, after the load test I recommend we postpone the launch by one week, so the payment retries can be fixed first.\n\nTell me if you want it shorter."}},
+
+ {"id": "s-r-it-pick", "task": "reply", "lang": "it", "fails": true,
+  "why": "the pick in Italian, without any of the English phrases",
+  "input": {"reply": "Possiamo migrare il database adesso oppure aspettare la release di novembre. Io aspetterei la release: migrare ora vuol dire due finestre di manutenzione invece di una. Procedo così?"}},
+
+ {"id": "s-r-ja-pick", "task": "reply", "lang": "ja", "fails": true,
+  "why": "the pick in Japanese",
+  "input": {"reply": "選択肢は二つあります。キャッシュを今日中に無効化するか、明日のデプロイまで待つかです。私なら明日まで待ちます。どうしますか？"}},
+
+ {"id": "s-r-es-neutral", "task": "reply", "lang": "es", "fails": false,
+  "why": "asks the user to choose but states no preference",
+  "input": {"reply": "Para las pruebas locales puedo usar PostgreSQL en Docker o SQLite en memoria. ¿Cuál prefieres?"}},
+
+ {"id": "s-r-de-about-rule", "task": "reply", "lang": "de", "fails": false,
+  "why": "text about picks and the rule, not a pick",
+  "input": {"reply": "Der Hook erkennt jetzt Sätze wie „ich würde X nehmen“ und schickt die Antwort einmal zurück, wenn in der Runde keine Frage gestellt wurde. Die Tests laufen durch."}},
+
+ {"id": "s-r-pt-default", "task": "reply", "lang": "pt", "fails": true,
+  "why": "names the course it will take unless the user says otherwise",
+  "input": {"reply": "O relatório pode sair em CSV ou em Excel. Vou gerar em CSV, a menos que você prefira Excel."}},
+
+ {"id": "s-r-en-defaults-taken", "task": "reply", "lang": "en", "fails": true,
+  "why": "defaults on the user's choices, stated after they were carried out",
+  "input": {"reply": "Version 2 of the importer is built and the tests pass.\n\n**Decisions for you.** I took defaults for the three open choices:\n- uploads are kept for 30 days;\n- a failed row is retried 5 times;\n- the summary e-mail goes to the uploader only.\n\nTell me if any should change."}},
+
+ {"id": "s-r-it-proposal", "task": "reply", "lang": "it", "fails": true,
+  "why": "one way forward named as the proposal, with no alternative laid out",
+  "input": {"reply": "Con la regola attuale il fondo di garanzia non copre i debiti in scadenza nei primi dieci giorni: nella simulazione restano insoluti 1,2 milioni.\n\n**La proposta: un campo `scadenza_minima` firmato dall'acquirente**, che di default vale la data della vendita. Il portafoglio lo mostra prima della firma. Non lo adotto finché non abbiamo provato ad attaccarlo."}},
+
+ {"id": "s-r-de-advice", "task": "reply", "lang": "de", "fails": false,
+  "why": "advice on what to look at next and a yes/no offer, not a pick between courses",
+  "input": {"reply": "Die Prüfung im Browser ist durch: zwei Fehler im Frontend gefunden und behoben, beide gepusht.\n\nOffen sind noch acht Kommentare des Review-Bots. Als Erstes würde ich mir den zur Rundung der Gebühren ansehen, weil er die Rechnungen betreffen könnte. Soll ich die Kommentare abarbeiten?"}},
+
+ {"id": "s-q-en-facts-pass", "task": "question", "lang": "en", "fails": false,
+  "why": "previews built from measured facts, each naming someone and what they get or lose, count as cases",
+  "input": {"question": {"question": "Where should the nightly report run?", "header": "Report", "multiSelect": false, "options": [
+   {"label": "On the database replica (Recommended)", "description": "Read from the replica at 2:00. Hard to undo: nothing.",
+    "preview": "The report's three queries took 41 minutes on the primary last night (read: logs/report-2026-10-25.log:3) and the replica lags 2 to 5 seconds (read: monitoring export, replica-lag.csv). A support agent opening a ticket at 2:20 no longer waits on a locked table; the report may miss the last five seconds of writes. Hard to undo: nothing.\nRecommended: it removes the 41-minute load from the primary for a five-second lag; wrong if the report must match the primary to the second, as finance's close does."},
+   {"label": "On the primary, at 4:00", "description": "Keep the primary, move the time. Hard to undo: nothing.",
+    "preview": "At 4:00 the primary handled 12 requests a minute last week (read: monitoring export, requests.csv), so the support agent working the night shift is the only one who feels the lock (assumed: one person on nights). The report stays exact. Hard to undo: nothing."},
+   {"label": "Other (describe in the note)", "description": "Your own answer.", "preview": "Your note replaces the options above."}]}}},
+
+ {"id": "s-u-en-user-undid", "task": "undone", "lang": "en", "fails": true,
+  "why": "the user drops what was picked ten minutes later",
+  "input": {"question": {"question": "The SDK has no wheel for our platform. How do we get it?", "header": "SDK", "multiSelect": false, "options": [
+    {"label": "Vendor the SDK source (Recommended)", "description": "Copy it under third_party/ and build it ourselves."},
+    {"label": "Wait for an official wheel", "description": "Block the feature until upstream ships one."}]},
+   "picked": "Vendor the SDK source (Recommended)", "note": null, "after": [
+    {"min": 1, "who": "assistant", "text": "Vendoring the SDK under third_party/sdk and adding it to the build."},
+    {"min": 8, "who": "assistant", "text": "The vendored SDK builds; I added a patch for the missing header."},
+    {"min": 10, "who": "user", "text": "hmm no, that patch is a mess. take the vendored sdk out, we'll wait for the wheel"},
+    {"min": 11, "who": "assistant", "text": "Removed third_party/sdk and the build changes; the feature is behind a flag until the wheel ships."}]}},
+
+ {"id": "s-u-en-kept", "task": "undone", "lang": "en", "fails": false,
+  "why": "the pick is carried out and only refined",
+  "input": {"question": {"question": "Should the export include archived projects?", "header": "Export", "multiSelect": false, "options": [
+    {"label": "Include them, marked", "description": "Add an `archived` column."},
+    {"label": "Leave them out", "description": "Only active projects."}]},
+   "picked": "Include them, marked", "note": null, "after": [
+    {"min": 2, "who": "assistant", "text": "Added the `archived` column to the export and a test for it."},
+    {"min": 15, "who": "user", "text": "nice. can you put archived ones at the end?"},
+    {"min": 16, "who": "assistant", "text": "Sorted: active first, archived after. Tests pass."}]}},
+
+ {"id": "s-u-it-assistant", "task": "undone", "lang": "it", "fails": true,
+  "why": "the assistant says the premise of its recommendation was wrong and the course changes",
+  "input": {"question": {"question": "Dove salviamo il codice fiscale del cliente?", "header": "Campo", "multiSelect": false, "options": [
+    {"label": "Nuova colonna `tax_code` (consigliata)", "description": "Una colonna dedicata nella tabella clienti."},
+    {"label": "Nel campo note", "description": "Nessuna migrazione."}]},
+   "picked": "Nuova colonna `tax_code` (consigliata)", "note": null, "after": [
+    {"min": 3, "who": "assistant", "text": "Scrivo la migrazione per `tax_code`."},
+    {"min": 12, "who": "assistant", "text": "Mi correggo: la tabella clienti ha già il campo `fiscal_id`, che contiene proprio il codice fiscale. La mia raccomandazione partiva da un presupposto sbagliato. Tolgo la migrazione e uso `fiscal_id`."},
+    {"min": 13, "who": "user", "text": "ok, giusto"}]}},
+
+ {"id": "s-u-ja-declined", "task": "undone", "lang": "ja", "fails": false,
+  "why": "dropping the pick is offered later and the user declines",
+  "input": {"question": {"question": "通知の送信にどのサービスを使いますか？", "header": "通知", "multiSelect": false, "options": [
+    {"label": "自前のキュー", "description": "既存のワーカーで送る。"},
+    {"label": "外部サービス", "description": "月額費用がかかる。"}]},
+   "picked": "自前のキュー", "note": null, "after": [
+    {"min": 5, "who": "assistant", "text": "自前のキューで通知を送るワーカーを追加しました。"},
+    {"min": 40, "who": "asked", "text": "再送処理が複雑になってきました。自前のキューをやめて外部サービスに切り替えますか？ — 自前のキューを続ける | 外部サービスに切り替える", "picked": "自前のキューを続ける"},
+    {"min": 41, "who": "assistant", "text": "了解です。再送処理をシンプルにして、自前のキューのまま進めます。"}]}},
+
+ {"id": "s-u-es-other-matter", "task": "undone", "lang": "es", "fails": false,
+  "why": "a later removal concerns another matter, not the pick",
+  "input": {"question": {"question": "¿Qué biblioteca usamos para los gráficos?", "header": "Gráficos", "multiSelect": false, "options": [
+    {"label": "Chart.js", "description": "Ligera y conocida."},
+    {"label": "D3", "description": "Más flexible, más código."}]},
+   "picked": "Chart.js", "note": null, "after": [
+    {"min": 4, "who": "assistant", "text": "Añadí Chart.js y el primer gráfico de ventas."},
+    {"min": 30, "who": "user", "text": "quita el gráfico de devoluciones, no lo usa nadie"},
+    {"min": 31, "who": "assistant", "text": "Quitado el gráfico de devoluciones; el de ventas sigue con Chart.js."}]}},
+
+ {"id": "s-u-de-replaced", "task": "undone", "lang": "de", "fails": true,
+  "why": "a later question offers to replace the pick and the user agrees",
+  "input": {"question": {"question": "Wie authentifizieren sich die Webhooks?", "header": "Webhooks", "multiSelect": false, "options": [
+    {"label": "Gemeinsames Geheimnis im Header (empfohlen)", "description": "Einfach, ein Wert pro Partner."},
+    {"label": "HMAC-Signatur", "description": "Signiert den Inhalt."}]},
+   "picked": "Gemeinsames Geheimnis im Header (empfohlen)", "note": null, "after": [
+    {"min": 3, "who": "assistant", "text": "Der Header `X-Webhook-Secret` wird jetzt geprüft."},
+    {"min": 25, "who": "asked", "text": "Ein Partner leitet die Webhooks über einen Proxy, der Header protokolliert, das Geheimnis wäre also in dessen Logs. Sollen wir doch auf HMAC-Signaturen umstellen? — Auf HMAC umstellen | Beim Header bleiben", "picked": "Auf HMAC umstellen"},
+    {"min": 26, "who": "assistant", "text": "Umgestellt: der Header ist entfernt, jede Anfrage wird per HMAC-SHA256 geprüft."}]}}
+]

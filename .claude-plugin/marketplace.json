@@ -1,0 +1,5 @@
+{
+  "name": "aidetic",
+  "owner": { "name": "aidetic" },
+  "plugins": [{ "name": "aidetic", "source": "./" }]
+}

@@ -1,0 +1,85 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 REPO/choice_gate.py start || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 REPO/choice_gate.py pre || true",
+            "timeout": 90
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 REPO/choice_gate.py post || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 REPO/choice_gate.py prompt || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 REPO/choice_gate.py stop || true",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 REPO/choice_gate.py reply",
+            "asyncRewake": true,
+            "timeout": 120,
+            "rewakeSummary": "aidetic sent the reply back",
+            "rewakeMessage": "The user's aidetic gate sent your last reply back:"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 REPO/choice_gate.py learn",
+            "asyncRewake": true,
+            "timeout": 300,
+            "rewakeSummary": "aidetic, from your habits",
+            "rewakeMessage": "The user's aidetic loop:"
+          }
+        ]
+      }
+    ]
+  }
+}
