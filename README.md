@@ -16,8 +16,10 @@ Then it runs on its own:
 
 1. At the end of every turn it reads your newest message in the background; you never wait for it.
 2. On a habit's 2nd, 4th, 8th, 16th … signal, Claude asks you once whether to keep a short
-   rule for it, drafted from your own words. Only you add a rule; declined, it is asked again when
-   the count has doubled.
+   rule for it, drafted from your own words. A habit about the subject of the work rather than how
+   Claude works with you, such as how a bot you are building should play its game, is not put to
+   you. Only you add a rule; declined, it is asked again when the count has doubled, and answered
+   "never", that habit is not asked about again.
 3. A kept rule is handed to every new session. A judge then watches the point where the habit
    happens and records a verdict on each turn, deciding nothing.
 4. A guard switches itself on only when its verdicts, set against your own later objections, clear
@@ -149,7 +151,7 @@ To work on it: `claude --plugin-dir <clone>` loads it for one session, and `clau
 | `aidetic habits [--days N]` | your habits, what you objected to and forewarned, and whether a guard could pay |
 | `aidetic habits show N` | your own words for habit N |
 | `aidetic rule list` | every habit the loop knows, its signals, its rule and its guard |
-| `aidetic rule ID accept [--text …]`, `decline`, `drop` | your answer to a proposed rule, run by Claude |
+| `aidetic rule ID accept [--text …]`, `decline`, `never`, `drop` | your answer to a proposed rule, run by Claude |
 | `aidetic correct ID "…"` | a denial, send-back or guard decision you say was wrong, in your words |
 | `aidetic arms` | the off arm against the on arm, when `off_arm` is between 0 and 1 |
 | `aidetic install` | the whole setup again, after an update; only what is missing or differs changes |

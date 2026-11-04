@@ -79,11 +79,10 @@ class Checks(unittest.TestCase):
 
 
 class Length(unittest.TestCase):
-    def test_a_question_over_the_cap_is_denied(self):
-        q = question(option("A", rec=True), option("B"), OTHER)
-        self.assertNotIn("too_long", failing(q))
-        long = question(option("A", rec=True, preview=CASE * 6), option("B", preview=CASE * 6), OTHER)
-        self.assertIn("too_long", failing(long))
+    def test_a_long_question_is_not_denied_and_its_length_is_recorded(self):
+        q = question(option("A", rec=True, preview=CASE * 20), option("B", preview=CASE * 20), OTHER)
+        self.assertGreater(questions.on_screen(q), 3000)
+        self.assertEqual(failing(q), {})
         self.assertEqual(questions.on_screen(q), questions.answer_rows([q], {"Which way?": "B"}, {}).__next__()[1]["chars"])
 
 
@@ -783,6 +782,19 @@ class Loop(unittest.TestCase):
         self.assertFalse(loop.due(h))   # a catch-up at 31 is not asked again at 32
         h["signals"] += [[str(n), "objection", n, "s"] for n in range(33, 65)]
         self.assertTrue(loop.due(h))
+        h["never"] = True
+        self.assertFalse(loop.due(h))
+
+    def test_never_stops_the_proposals_and_accept_still_keeps_one(self):
+        h = self.live()["habits"][self.k]
+        h["signals"].append(["old2", "objection", time.time(), "s0"])
+        (self.base / "aidetic/habits/live.json").write_text(json.dumps({"habits": {self.k: h}}))
+        self.assertIn("never asked again", self.run_gate("rule", self.k, "never").stdout)
+        import loop
+        self.assertFalse(loop.due(self.live()["habits"][self.k]))
+        self.assertIn("never asked again", self.run_gate("rule", "list").stdout)
+        self.assertIn("kept", self.run_gate("rule", self.k, "accept", "--text", "I wait for go.").stdout)
+        self.assertFalse(self.live()["habits"][self.k]["never"])
 
     def test_a_rule_is_proposed_at_the_turn_end_kept_on_accept_and_handed_to_sessions(self):
         path = fake_judge(self.bin,
@@ -822,6 +834,30 @@ class Loop(unittest.TestCase):
         self.run_gate("rule", self.k, "drop")
         self.assertFalse((self.base / "aidetic/rules.md").exists())
         self.assertEqual(json.loads((self.base / "settings.json").read_text())["hooks"]["PreToolUse"], [])
+
+    def test_a_habit_about_the_work_s_subject_is_not_put_to_the_user(self):
+        path = fake_judge(self.bin,
+                          correction={"items": [dict(i=1, kind="objection", habit=self.NAME, act="change",
+                                                     quote="the bot sends its scouts out of range")]},
+                          match={"items": []}, draft={"rule": "I keep scouts within range.", "subject": True})
+        folder = self.base / "projects/-p"
+        folder.mkdir(parents=True)
+        t0 = time.time() - 60
+        at = lambda s: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0 + s))
+        lines = [{"type": "assistant", "timestamp": at(0), "message": {"content": [{"type": "text", "text": "Ran it."}]}},
+                 {"type": "user", "timestamp": at(10), "message": {"content": "the bot sends its scouts out of range"}}]
+        transcript = folder / "s1.jsonl"
+        transcript.write_text("".join(json.dumps(x) + "\n" for x in lines))
+        (self.base / "aidetic/state.json").write_text(json.dumps({"turns": {"s1": t0 + 9}}))
+        stop = dict(session_id="s1", transcript_path=str(transcript), cwd="/home/u/p", last_assistant_message="Ok.")
+        r = self.run_gate("learn", payload=stop, path=path)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))   # nothing woken, nothing said
+        h = self.live()["habits"][self.k]
+        self.assertEqual((len(h["signals"]), h["proposed"], h["skipped"]), (2, [], [2]))
+        import loop
+        h["signals"].append(["n3", "objection", time.time(), "s1"])
+        self.assertFalse(loop.due(h))   # the skip keeps the doubling: next at the 4th
+        self.assertIn("skipped at 2 (about the subject)", self.run_gate("rule", "list").stdout)
 
     def test_a_message_aidetic_habits_read_mid_turn_is_not_read_again(self):
         import habits

@@ -4,7 +4,6 @@ reply's text; no I/O."""
 import re
 
 MIN_PREVIEW = 60   # chars; a placeholder such as "fine" or "see above" does not count as a case
-MAX_CHARS = 1000   # a question's characters, read in 40 s at 25 a second
 REC = re.compile(r"\(recommended\)", re.I)
 OTHER = re.compile(r"^\s*(other|something else|none of|neither)\b", re.I)
 STATES_REC = re.compile(r"recommend|wrong if|would make (it|this) wrong", re.I)
@@ -91,11 +90,6 @@ def no_other(q, unread):
     return [] if len(real(q)) < len(options(q)) else ["Other"]
 
 
-def too_long(q, unread):
-    n = on_screen(q)
-    return [f"{n} characters"] if n > MAX_CHARS else []
-
-
 def read_unopened(q, unread):
     return [f"{o.get('label', '?')} ({', '.join(sorted(cited(o) & unread))})"
             for o in real(q) if cited(o) & unread]
@@ -129,11 +123,6 @@ CHECKS = {   # check: what the deny says, before the list of what it found
     read_unopened:
      "A `read:` tag names a file this session has not opened, and `read:` is for what was read "
      "here. Open it before asking, or tag the fact `assumed:`. Options",
-    too_long:
-     f"A question here puts more than {MAX_CHARS:,} characters on screen across its labels, "
-     "descriptions and previews, more than a quick answer reads. Shorten each case to a sentence "
-     "or two, keeping who meets the option, the moment and what they see or lose, with its tags, "
-     "and keep descriptions short. Questions",
 }
 
 

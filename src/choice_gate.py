@@ -54,7 +54,7 @@ verdict as a `judged` event and decides nothing.
            asked and was let through (missed), in their words (RULE.md)
   habits [--days N] [show N]     which of the user's corrections of Claude recur, and whether a
            guard where each happens could pay (habits.py)
-  rule [list] | rule ID accept [--text TEXT] | decline | drop      the user's answer to a rule the
+  rule [list] | rule ID accept [--text TEXT] | decline | never | drop      the user's answer to a rule the
            loop proposed, run by Claude (loop.py)
 
 Every hook fails open: a bug here must never stop a question from being asked.
@@ -173,7 +173,7 @@ def pre(p):
 
 def judged(asked, p):
     """What fails, decided by the judge: its reading of each single-select question for
-    the rule's form, every question read at once; the length and the cited files checked in code.
+    the rule's form, every question read at once; the cited files checked in code.
     None when a reading fails, so that the patterns decide rather than nothing."""
     qs = [q for q in asked if not q.get("multiSelect")]
     if not qs:
@@ -190,7 +190,6 @@ def judged(asked, p):
                         judge=judge.key(config), v=judge.version("question"), fails=bool(checks), checks=checks,
                         secs=meta["secs"], sid=p.get("session_id", ""), tuid=p.get("tool_use_id", ""))
             if reading["recommended"] or questions.previews(q):   # the rule's form is owed
-                checks.update({"too_long": questions.too_long(q, set())} if questions.on_screen(q) > questions.MAX_CHARS else {})
                 cited[q.get("question", "")] = {n.split(":")[0].split("/")[-1] for n in reading["read_files"]
                                                 if questions.FILE.fullmatch(n.split(":")[0])} - questions.IN_CONTEXT
             for name, labels in checks.items():

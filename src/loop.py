@@ -4,7 +4,9 @@
    Stop hook Claude Code runs in the background), and a signal, an objection or an instruction given
    in advance, is put with a known habit or opens one;
 2. *propose*: on a habit's 2nd, 4th, 8th … signal the session is woken once to put a rule for it to
-   the user; only the user adds one (`aidetic rule ID accept`), and every session is handed it then;
+   the user, unless the draft says the habit is about the work's subject (what a bot should do in its
+   game) rather than how the assistant works; only the user adds one (`aidetic rule ID accept`), and
+   every session is handed it then;
 3. *watch*: a habit with a rule has a judge at its point of action that records a verdict on the
    first such act of each turn and decides nothing (`watch`, a PreToolUse hook installed only while a
    habit is watched there, and `learn` for a turn's reply);
@@ -15,7 +17,7 @@
 The state is ~/.claude/aidetic/habits/live.json, under a lock of its own; the rules the user kept are
 ~/.claude/aidetic/rules.md, which the `start` and `prompt` hooks hand to sessions.
 
-  rule [list] | rule ID accept [--text TEXT] | rule ID decline | rule ID drop
+  rule [list] | rule ID accept [--text TEXT] | rule ID decline | rule ID never | rule ID drop
            what Claude runs on the user's answer to a proposal, or when they drop a rule
 """
 import hashlib
@@ -48,10 +50,10 @@ MATCHERS = {"change": "Edit|Write|NotebookEdit|MultiEdit|Bash", "message": "mcp_
 
 PROPOSE = ("The user has signalled this habit {n} times: {name}. In their words: {words}. Ask them now, "
            "through AskUserQuestion, whether every new session should keep this rule: “{rule}”. Offer to "
-           "keep it as written and not now, with Other for their own wording; then run `aidetic rule {k} "
-           "accept` (adding --text \"their wording\" if they wrote one) or `aidetic rule {k} decline`. If "
-           "they ask what this is: aidetic proposes a rule on a habit's 2nd, 4th, 8th … signal and adds "
-           "one only when they accept.")
+           "keep it as written, not now, and never ask again for this habit, with Other for their own "
+           "wording; then run `aidetic rule {k} accept` (adding --text \"their wording\" if they wrote one), "
+           "`aidetic rule {k} decline` or `aidetic rule {k} never`. If they ask what this is: aidetic "
+           "proposes a rule on a habit's 2nd, 4th, 8th … signal and adds one only when they accept.")
 SWITCHED = "Tell the user in one line, and nothing more: aidetic switched {state} its guard for “{name}” ({why})."
 
 
@@ -132,22 +134,25 @@ def assign(signals, cfg):
 def due(h):
     """A proposal is due on the 2nd, 4th, 8th … signal: the next comes at the first power of two at
     least twice the count of the last. A habit seeded past its 2nd without one has it at its next
-    signal (at 31 seeded, the 32nd; then the 64th)."""
+    signal (at 31 seeded, the 32nd; then the 64th). A draft skipped as about the subject counts as
+    a proposal for the schedule. Never for a habit the user said never to ask about again."""
     n = len(h["signals"])
-    if h.get("rule") or n < 2:
+    if h.get("rule") or h.get("never") or n < 2:
         return False
-    if not h.get("proposed"):
+    asked = h.get("proposed", []) + h.get("skipped", [])
+    if not asked:
         return True
-    return n >= 1 << (2 * max(h["proposed"]) - 1).bit_length()
+    return n >= 1 << (2 * max(asked) - 1).bit_length()
 
 
 def draft(h, cfg):
-    """A rule for the habit from the user's own words, and those words."""
+    """A rule for the habit from the user's own words, those words, and whether the habit is about
+    the work's subject rather than how the assistant works."""
     of = {r["id"]: r for r in load(habits.READINGS)}
     words = [of[s[0]]["quote"] for s in h["signals"] if s[0] in of and of[s[0]]["quote"]][-12:]
     text = f"THE BEHAVIOUR: {h['name']} (where: {h['act']})\nTHE USER'S WORDS:\n" + "\n".join(f"- {w}" for w in words)
     reading, _ = judge.draw("draft", dict(input=dict(text=text)), cfg)
-    return " ".join(reading["rule"].split())[:400], words
+    return " ".join(reading["rule"].split())[:400], words, bool(reading.get("subject"))
 
 
 def watching(act):
@@ -214,8 +219,12 @@ def learn(p):
     for k in dict.fromkeys(placed.values()):
         h = state()["habits"][k]
         if due(h):
-            rule, words = draft(h, cfg)
+            rule, words, subject = draft(h, cfg)
             n = len(h["signals"])
+            if subject:   # not the user's habit with the assistant: not put to them, nothing said
+                update(lambda st, k=k, n=n: st["habits"][k].setdefault("skipped", []).append(n))
+                ledger.emit(kind="rule_skipped", phase="loop", habit=k, sid=sid, signals=n, why="subject")
+                continue
 
             def mark(st, k=k, n=n, rule=rule):
                 st["habits"][k]["proposed"].append(n)
@@ -368,13 +377,15 @@ def rule(args):
     hs = state().get("habits", {})
     if not args or args[0] == "list":
         for k, h in sorted(hs.items(), key=lambda kv: -len(kv[1]["signals"])):
-            mark = f"rule, guard {h['guard']}: {h['rule']}" if h.get("rule") else (
-                f"proposed at {', '.join(map(str, h['proposed']))}" if h.get("proposed") else "")
+            mark = f"rule, guard {h['guard']}: {h['rule']}" if h.get("rule") else "never asked again" if h.get(
+                "never") else " ".join(([f"proposed at {', '.join(map(str, h['proposed']))}"] if h.get("proposed") else [])
+                                       + ([f"skipped at {', '.join(map(str, h['skipped']))} (about the subject)"]
+                                          if h.get("skipped") else []))
             print(f"{k}  {len(h['signals']):>3} signals  {h['name'][:60]:60s}  {mark}")
         return
     k, verb = args[0], (args[1] if len(args) > 1 else "")
-    if k not in hs or verb not in ("accept", "decline", "drop"):
-        sys.exit("aidetic rule ID accept [--text TEXT] | decline | drop   (IDs: `aidetic rule list`)")
+    if k not in hs or verb not in ("accept", "decline", "never", "drop"):
+        sys.exit("aidetic rule ID accept [--text TEXT] | decline | never | drop   (IDs: `aidetic rule list`)")
     text = " ".join((option(args, "--text", "") or hs[k].get("draft") or "").split())
     if verb == "accept" and not text:
         sys.exit("aidetic rule: no rule drafted for this habit yet; give it with --text")
@@ -383,7 +394,9 @@ def rule(args):
         h = st["habits"][k]
         h["answers"].append([len(h["signals"]), verb, ledger.now()])
         if verb == "accept":
-            h["rule"], h["guard"] = text, "watch"
+            h["rule"], h["guard"], h["never"] = text, "watch", False
+        elif verb == "never":
+            h["never"] = True
         elif verb == "drop":
             h["rule"], h["guard"] = None, "off"
     update(put)
@@ -393,4 +406,4 @@ def rule(args):
                                     if h.get("rule") and h["act"] in MATCHERS}))
     ledger.emit(kind=f"rule_{verb}", phase="loop", habit=k, rule=text if verb == "accept" else None)
     print({"accept": f"kept: {text}", "decline": "declined; asked again at its next doubling",
-           "drop": "dropped"}[verb])
+           "never": "never asked again; `aidetic rule ID accept --text …` still keeps one", "drop": "dropped"}[verb])

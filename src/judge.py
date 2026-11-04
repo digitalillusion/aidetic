@@ -6,7 +6,8 @@ carry RULE.md itself, so the rule's text is their answer key and a change to it 
 code turns the reading into the gate's decision, so what is not language (the options, the
 previews, the cited files, the escape) stays in code. Five more serve `habits` and its loop
 (habits.py, loop.py): *correction* reads the user's messages, *habits* groups what they object to,
-*match* puts a new signal with a known habit, *draft* writes a rule for one, *watch* reads an act
+*match* puts a new signal with a known habit, *draft* writes a rule for one and says whether the
+habit is about the work's subject rather than how the assistant works, *watch* reads an act
 against an accepted rule."""
 import hashlib
 import json
@@ -138,7 +139,12 @@ words of English saying what the assistant does, else an empty string."""
 DRAFT = """You write one rule for an AI coding assistant, in its own voice ("I …"), that would have \
 spared its user the behaviour named below, from the user's own words about it, in any language. One \
 or two sentences in English, at most 300 characters, saying what to do instead and when; no examples, \
-and no names of people, files or projects."""
+and no names of people, files or projects. Also say whether the behaviour is about the subject of the \
+work rather than about how the assistant works: subject is true when the user's words are about what a \
+program, bot or agent should do within its own domain (a game, a market, a simulation, any domain): its \
+strategy, its moves, or the rules and facts of that domain, including that it did the wrong thing there. \
+It is false when they are about how the assistant itself works with the user: when it acts, what it \
+changes or sends, how it reads what the user means, how it checks, tests or reports its work, in any domain."""
 
 WATCH = """You read one act an AI coding assistant is about to take or has just taken, the last \
 message its user typed before it, and a rule the user keeps for the assistant. Say whether the act \
@@ -160,8 +166,8 @@ SCHEMAS.update({
         "items": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["id", "habit", "name"],
             "properties": {"id": {"type": "string"}, "habit": {"type": "string"}, "name": {"type": "string"}}}}}},
-    "draft": {"type": "object", "additionalProperties": False, "required": ["rule"],
-              "properties": {"rule": {"type": "string"}}},
+    "draft": {"type": "object", "additionalProperties": False, "required": ["rule", "subject"],
+              "properties": {"rule": {"type": "string"}, "subject": {"type": "boolean"}}},
     "watch": {"type": "object", "additionalProperties": False, "required": ["breaks", "why"],
               "properties": {"breaks": {"type": "boolean"}, "why": {"type": "string"}}},
 })
@@ -210,8 +216,7 @@ def render(task, case):
 
 def question_checks(q, reading):
     """The checks of questions.CHECKS that fail, decided from a reading of the question:
-    {check name: [option labels]}. The file check needs the transcript and the length check no
-    reading; both stay with the hook."""
+    {check name: [option labels]}. The file check needs the transcript and stays with the hook."""
     if q.get("multiSelect"):
         return {}
     opts, read = questions.options(q), reading["options"]
