@@ -12,7 +12,8 @@ const gate = ($: EngineInterface) => `${$.plugin.root}/src/choice_gate.py`
 type Ran = { code: number; out: string; err: string }
 
 // The `reply` and `learn` hooks, which settings run with `asyncRewake`: after the turn has ended,
-// and a send-back (exit 2) wakes the session with what the gate wrote to stderr.
+// and a send-back (exit 2) wakes the session with what the gate wrote to stderr. `learn` also judges
+// the whole turn against the rules the user kept, so no other tool call goes to the gate.
 const WAKES = [
   { command: 'reply', timeoutMs: 120_000, summary: 'aidetic sent the reply back', message: "The user's aidetic gate sent your last reply back:" },
   { command: 'learn', timeoutMs: 300_000, summary: 'aidetic, from your habits', message: "The user's aidetic loop:" },
@@ -32,17 +33,6 @@ const standsDown = ($: EngineInterface, home: string) =>
       return true
     }
   })())
-
-// The points of action a habit is watched at: the matchers `write_watch` keeps in watched.json, where
-// the settings hooks have them as PreToolUse entries. Anchored, as a settings matcher is.
-const isWatched = async ($: EngineInterface, home: string, tool: string) => {
-  try {
-    const matchers: unknown = JSON.parse(String(await $.fs.read(`${home}/.claude/aidetic/watched.json`)))
-    return Array.isArray(matchers) && matchers.some(matcher => new RegExp(`^(?:${matcher})$`).test(tool))
-  } catch {
-    return false // none watched, or none yet
-  }
-}
 
 // What an installed plugin still needs that hooks cannot give: the `aidetic` command, which the rule
 // and the loop tell Claude to run, and judge.json. `install --plugin` writes them, once, and never
@@ -127,17 +117,6 @@ export const register: Register = on => {
       tool_input: { questions: e.questions },
     }, 90_000)
     const reason = denial(ran, 'question')
-    return reason ? { deny: reason } : next(e)
-  }).catch(($, e, next) => next(e))
-
-  // `watch`: the loop's verdict on an act, or its guard's decision, where a habit is watched.
-  on('tool.call', async ($, e, next) => {
-    const home = await $.env.get('HOME')
-    if (!home || !base || !(await isWatched($, home, e.tool))) return next(e)
-    const input: Record<string, unknown> = { ...e }
-    for (const key of ['tool', 'tool_use_id', 'agentId', 'requestMeta']) delete input[key]
-    const ran = await run($, 'watch', { hook_event_name: 'PreToolUse', ...base, tool_name: e.tool, tool_use_id: e.tool_use_id, tool_input: input }, 90_000)
-    const reason = denial(ran, 'act')
     return reason ? { deny: reason } : next(e)
   }).catch(($, e, next) => next(e))
 

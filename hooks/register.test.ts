@@ -9,18 +9,14 @@ const NAMED = '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"python3 
 const ASKED = [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: 'a' }, { label: 'B', description: 'b' }] }]
 
 const DENY = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'no pick named (gate event ab12cd)' } })
-const GUARD = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'This breaks a rule the user keeps (gate event cd34ef)' } })
 const RULE = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'the rule' } })
 
 // Nothing sits beneath the plugin: these hooks stand for the engine, and the gate is a function.
-// `missing` names what is not there to find; `watched` is the text of watched.json, where there is one.
-const engine = (on: On, settings: string | undefined, gate: (c: Call) => Gate = () => ({ exitCode: 0 }), missing: string[] = [], watched?: string) => {
+// `missing` names what is not there to find.
+const engine = (on: On, settings: string | undefined, gate: (c: Call) => Gate = () => ({ exitCode: 0 }), missing: string[] = []) => {
   const calls: Call[] = []
   on('env.get', () => ({ value: '/home/test' }))
-  on('fs.read', (_, e) => {
-    const text = e.path.endsWith('watched.json') ? watched : settings
-    return text === undefined ? { deny: 'no such file' } : { value: text }
-  })
+  on('fs.read', () => (settings === undefined ? { deny: 'no such file' } : { value: settings }))
   on('fs.exists', (_, e) => ({ value: !missing.some(name => e.path.endsWith(name)) }))
   on('process.run', (_, e) => {
     const call = { command: e.argv[2], input: JSON.parse(e.init?.stdin ?? '{}'), argv: e.argv }
@@ -75,35 +71,13 @@ test('a question the gate lets through goes on', async ($, on) => {
   expect(calls.some(c => c.command === 'pre')).toBe(true)
 })
 
-test('an act at a watched point goes to the gate, and its guard can deny it', async ($, on) => {
-  const calls = engine(on, CLEAN, c => (c.command === 'watch' ? { exitCode: 0, stdout: GUARD } : { exitCode: 0 }), [], '["Edit|Bash"]')
+test('a tool call other than a question never reaches the gate: the loop judges the turn at its end', async ($, on) => {
+  const calls = engine(on, CLEAN)
 
   await $.classic.UserPromptSubmit({ prompt: 'go' })
-  const result = await $.tool.call({ tool: 'Bash', command: 'git commit -m x' })
+  expect((await $.tool.call({ tool: 'Bash', command: 'git commit -m x' })).deny).toBeUndefined()
 
-  expect(result.deny).toContain('gate event cd34ef')
-  const watch = calls.find(c => c.command === 'watch')!
-  expect(watch.input.tool_name).toBe('Bash')
-  expect(watch.input.tool_input).toEqual({ command: 'git commit -m x' })
-  expect(watch.input.session_id).toBeTruthy()
-})
-
-test('an act where no habit is watched never reaches the gate', async ($, on) => {
-  const calls = engine(on, CLEAN, () => ({ exitCode: 0, stdout: GUARD }), [], '["Edit"]')
-
-  await $.classic.UserPromptSubmit({ prompt: 'go' })
-  expect((await $.tool.call({ tool: 'Bash', command: 'ls' })).deny).toBeUndefined()
-
-  expect(calls.some(c => c.command === 'watch')).toBe(false)
-})
-
-test('with no watched.json nothing is watched', async ($, on) => {
-  const calls = engine(on, CLEAN, () => ({ exitCode: 0, stdout: GUARD }))
-
-  await $.classic.UserPromptSubmit({ prompt: 'go' })
-  expect((await $.tool.call({ tool: 'Bash', command: 'ls' })).deny).toBeUndefined()
-
-  expect(calls.some(c => c.command === 'watch')).toBe(false)
+  expect(calls.map(c => c.command)).toEqual(['prompt'])
 })
 
 test('a gate that cannot run lets the question through', async ($, on) => {

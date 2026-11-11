@@ -7,8 +7,8 @@ code turns the reading into the gate's decision, so what is not language (the op
 previews, the cited files, the escape) stays in code. Five more serve `habits` and its loop
 (habits.py, loop.py): *correction* reads the user's messages, *habits* groups what they object to,
 *match* puts a new signal with a known habit, *draft* writes a rule for one and says whether the
-habit is about the work's subject rather than how the assistant works, *watch* reads an act
-against an accepted rule."""
+habit is about the work's subject rather than how the assistant works, *turn* reads a whole turn
+against every rule the user kept that applies where it ran."""
 import hashlib
 import json
 import os
@@ -17,6 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import ledger
 import questions
 
 RULE = (Path(__file__).resolve().parent.parent / "RULE.md").read_text()   # the answer key
@@ -146,11 +147,17 @@ strategy, its moves, or the rules and facts of that domain, including that it di
 It is false when they are about how the assistant itself works with the user: when it acts, what it \
 changes or sends, how it reads what the user means, how it checks, tests or reports its work, in any domain."""
 
-WATCH = """You read one act an AI coding assistant is about to take or has just taken, the last \
-message its user typed before it, and a rule the user keeps for the assistant. Say whether the act \
-breaks the rule, and in a few words why."""
+TURN = """You read one turn of an AI coding assistant's work and the rules its user keeps for it, \
+each with an id. You get, oldest first, what the user wrote in the session before the turn: their \
+messages and their answers to the assistant's questions; then the turn: every tool call the \
+assistant made after the user's last message, in order, with any answer the user gave to a question \
+within it, and the reply that ended it. Any language. For each rule, say whether the turn breaks it. \
+Judge against everything the user wrote in the session, not only their last message: a go-ahead, a \
+request or an instruction given earlier holds until the user withdraws it. A rule the turn gives no \
+occasion to apply is not broken. why: a few words naming the act or the words that break it, or why \
+it is not broken."""
 
-HABITS = {"correction": CORRECTION, "habits": GROUPS, "match": MATCH, "draft": DRAFT, "watch": WATCH}
+HABITS = {"correction": CORRECTION, "habits": GROUPS, "match": MATCH, "draft": DRAFT, "turn": TURN}
 SCHEMAS.update({
     "correction": {"type": "object", "additionalProperties": False, "required": ["items"], "properties": {
         "items": {"type": "array", "items": {
@@ -168,8 +175,10 @@ SCHEMAS.update({
             "properties": {"id": {"type": "string"}, "habit": {"type": "string"}, "name": {"type": "string"}}}}}},
     "draft": {"type": "object", "additionalProperties": False, "required": ["rule", "subject"],
               "properties": {"rule": {"type": "string"}, "subject": {"type": "boolean"}}},
-    "watch": {"type": "object", "additionalProperties": False, "required": ["breaks", "why"],
-              "properties": {"breaks": {"type": "boolean"}, "why": {"type": "string"}}},
+    "turn": {"type": "object", "additionalProperties": False, "required": ["rules"], "properties": {
+        "rules": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["id", "breaks", "why"],
+            "properties": {"id": {"type": "string"}, "breaks": {"type": "boolean"}, "why": {"type": "string"}}}}}},
 })
 
 
@@ -343,8 +352,31 @@ def read(task, case, backend="cli", **options):
 
 
 CONTROL = ("backend", "shadow", "decide", "off_arm")   # judge.json's keys that are not the backend's options
+PAUSE, PAUSE_MAX = 60, 3600   # seconds the judge pauses after a failure, doubled for each next one in a row, and at most
 
 
-def draw(task, case, config):
-    """One draw of the configured judge (configured()) on one case: (reading, meta)."""
-    return read(task, case, backend=config["backend"], **{k: v for k, v in config.items() if k not in CONTROL})
+def draw(task, case, config, pause=True):
+    """One draw of the configured judge (configured()) on one case: (reading, meta). After a failure
+    the hooks leave the task alone, a minute after the first and twice as long after each next one
+    in a row, up to an hour, so that a backend that cannot answer, a spent usage limit among them, is
+    not called again at every hook meanwhile: a draw in a pause fails at once, and the hooks fall
+    back as on any failure. Each task pauses on its own failures, so that a slow reading of one
+    does not stop the others; a success ends its pause. With pause=False (a run the user started)
+    the draw is made whatever the pause, and its outcome leaves the pause as it is."""
+    held = (ledger.read_state().get("judge_pause") or {}).get(task) or {}
+    if pause and time.time() < held.get("until", 0):
+        raise RuntimeError(f"judge paused on {task} after {held['failures']} failures in a row, until "
+                           f"{time.strftime('%H:%M', time.localtime(held['until']))}")
+    try:
+        out = read(task, case, backend=config["backend"], **{k: v for k, v in config.items() if k not in CONTROL})
+    except Exception:
+        if pause:
+            def failed(st):
+                paused = st.setdefault("judge_pause", {})
+                n = (paused.get(task) or {}).get("failures", 0) + 1
+                paused[task] = dict(failures=n, until=time.time() + min(PAUSE * 2 ** (n - 1), PAUSE_MAX))
+            ledger.with_state(failed)
+        raise
+    if pause and held:
+        ledger.with_state(lambda st: (st.get("judge_pause") or {}).pop(task, None))
+    return out

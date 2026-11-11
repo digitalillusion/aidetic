@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -555,42 +556,6 @@ class Hook(unittest.TestCase):
 
 class Carrier(unittest.TestCase):
     """One carrier of the gate at a time: the settings hooks while settings.json names it, else the plugin."""
-    MATCHER = "Edit|Write|NotebookEdit|MultiEdit|Bash"
-
-    def write_watch(self, home, *acts):
-        code = "import sys; sys.path.insert(0, sys.argv[1]); import choice_gate; print(choice_gate.write_watch(sys.argv[2:]))"
-        return subprocess.run([sys.executable, "-c", code, str(SRC), *acts], capture_output=True, text=True,
-                              env={**os.environ, "HOME": home}).stdout.strip()
-
-    def settings(self, home, hooks=None):
-        path = Path(home) / ".claude/settings.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if hooks is not None:
-            path.write_text(json.dumps({"hooks": hooks}))
-        return path
-
-    def test_with_the_plugin_the_watched_points_go_to_a_file_and_settings_stay_untouched(self):
-        home = tempfile.mkdtemp()
-        settings = self.settings(home, {"Stop": [{"hooks": [{"type": "command", "command": "other.sh"}]}]})
-        before = settings.read_text()
-        watched = Path(home) / ".claude/aidetic/watched.json"
-        self.assertEqual(self.write_watch(home, "change", "question", "command"), "True")
-        self.assertEqual(json.loads(watched.read_text()), [self.MATCHER, "AskUserQuestion", "Bash"])
-        self.assertEqual(self.write_watch(home, "change", "question", "command"), "False")   # nothing to change
-        self.assertEqual(self.write_watch(home), "True")   # no habit watched: none
-        self.assertEqual(json.loads(watched.read_text()), [])
-        self.assertEqual(settings.read_text(), before)
-
-    def test_with_the_settings_hooks_the_entries_stay_in_settings(self):
-        home = tempfile.mkdtemp()
-        stop = {"type": "command", "command": "python3 /g/choice_gate.py stop || true", "timeout": 5}
-        settings = self.settings(home, {"Stop": [{"hooks": [stop]}]})
-        self.write_watch(home, "command")
-        pre = json.loads(settings.read_text())["hooks"]["PreToolUse"]
-        self.assertEqual([(e["matcher"], e["hooks"][0]["command"]) for e in pre],
-                         [("Bash", "python3 /g/choice_gate.py watch || true")])
-        self.assertFalse((Path(home) / ".claude/aidetic/watched.json").exists())
-
     def test_the_reply_hook_is_the_plugins_when_settings_do_not_name_the_gate(self):
         home = tempfile.mkdtemp()
         r = subprocess.run([sys.executable, str(SRC / "choice_gate.py"), "hook"], capture_output=True, text=True,
@@ -672,6 +637,22 @@ class Install(unittest.TestCase):
         self.assertIn("is there already, to /elsewhere/choice_gate.py", out)
         self.assertEqual((base / "aidetic/judge.json").read_text(), '{"backend": "anthropic"}')
 
+    def test_the_per_act_watch_entries_of_earlier_versions_are_taken_out(self):
+        home = tempfile.mkdtemp()
+        base = Path(home) / ".claude"
+        (base / "aidetic").mkdir(parents=True)
+        mine = {"matcher": "Bash", "hooks": [{"type": "command", "command": "lint.sh"}]}
+        watch = lambda m: {"matcher": m, "hooks": [{"type": "command", "command": "python3 /g/choice_gate.py watch || true"}]}
+        (base / "settings.json").write_text(json.dumps({"hooks": {"PreToolUse": [watch("Edit|Bash"), mine, watch(".*")]}}))
+        (base / "aidetic/watched.json").write_text('["Bash"]')
+        out = self.run_install(home)
+        pre = json.loads((base / "settings.json").read_text())["hooks"]["PreToolUse"]
+        self.assertNotIn("choice_gate.py watch", json.dumps(pre))
+        self.assertIn(mine, pre)
+        self.assertFalse((base / "aidetic/watched.json").exists())
+        self.assertIn("the per-act `watch` entries taken out", out)
+        self.assertNotIn("taken out", self.run_install(home))
+
 
 class Habits(unittest.TestCase):
     def test_each_tool_call_has_its_point_of_action(self):
@@ -730,7 +711,7 @@ class Habits(unittest.TestCase):
 def fake_judge(bin_, **readings):
     """A `claude` that answers each task of the judge with a fixed reading, known by its definition's words."""
     keys = {"correction": "You read messages a user typed", "match": "habits already known",
-            "draft": "You write one rule", "watch": "about to take or has just taken",
+            "draft": "You write one rule", "turn": "You read one turn",
             "habits": "Group them into habits"}
     out = lambda r: "'" + json.dumps({"structured_output": r, "total_cost_usd": 0, "modelUsage": {"sonnet": {}}}) + "'"
     cases = "".join(f"  *'{keys[t]}'*) echo {out(r)};;\n" for t, r in readings.items())
@@ -816,16 +797,16 @@ class Loop(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("I commit only once the user has said to.", r.stderr)
         self.assertIn(f"aidetic rule {self.k} accept", r.stderr)
+        self.assertIn("Its signals came from: p 1.", r.stderr)   # the one before it has no transcript left
+        self.assertIn("keep it only in p", r.stderr)
+        self.assertIn("--project '/home/u/p'", r.stderr)
         h = self.live()["habits"][self.k]
         self.assertEqual((len(h["signals"]), h["proposed"]), (2, [2]))
         self.assertEqual(self.run_gate("learn", payload=stop, path=path).returncode, 0)   # nothing new: quiet
         self.assertIn("kept", self.run_gate("rule", self.k, "accept").stdout)
         kept = (self.base / "aidetic/rules.md").read_text()
         self.assertIn("I commit only once the user has said to.", kept)
-        settings = json.loads((self.base / "settings.json").read_text())
-        watch = [e["matcher"] for e in settings["hooks"]["PreToolUse"]
-                 if any(h["command"].endswith("watch || true") for h in e["hooks"])]
-        self.assertEqual(watch, ["Edit|Write|NotebookEdit|MultiEdit|Bash"])
+        self.assertNotIn("PreToolUse", (self.base / "settings.json").read_text())   # nothing per act
         (self.base / "aidetic/judge.json").write_text('{"backend": "cli", "model": "opus", "off_arm": 1}')
         handed = json.loads(self.run_gate("start", payload={"session_id": "n1", "cwd": "/home/u"}).stdout)
         context = handed["hookSpecificOutput"]["additionalContext"]
@@ -833,7 +814,6 @@ class Loop(unittest.TestCase):
         self.assertNotIn("When the user must choose", context)
         self.run_gate("rule", self.k, "drop")
         self.assertFalse((self.base / "aidetic/rules.md").exists())
-        self.assertEqual(json.loads((self.base / "settings.json").read_text())["hooks"]["PreToolUse"], [])
 
     def test_a_habit_about_the_work_s_subject_is_not_put_to_the_user(self):
         path = fake_judge(self.bin,
@@ -884,27 +864,197 @@ class Loop(unittest.TestCase):
         self.assertEqual(len(readings.read_text().splitlines()), 1)
         self.assertEqual(self.live()["read"]["s1"], m["t"])
 
-    def test_the_guard_switches_on_its_bars_and_denies_once_on(self):
+    def test_an_objection_scores_the_turn_it_answers_and_an_on_guard_sends_the_turn_back(self):
         import loop
         h = loop.blank(self.NAME, "change")
         h["rule"], h["guard"] = "I commit only once the user has said to.", "watch"
-        events = [dict(kind="watched", habit=self.k, sid="s", turn=float(n), breaks=n < 3) for n in range(40)]
-        h["signals"] = [[f"o{n}", "objection", n + 0.5, "s"] for n in range(3)]   # each right after a flagged turn
-        self.assertTrue(loop.score(self.k, h, events)["pays"])
-        events += [dict(kind="watched", habit=self.k, sid="s", turn=40.0 + n, breaks=True) for n in range(5)]
+        turned = lambda n, breaks, k=self.k: dict(kind="watched_turn", sid="s", turn=10.0 * n, verdicts={k: [breaks, "x"]})
+        events = [turned(n, n < 3) for n in range(40)]
+        # each objection answers a flagged turn; the turn its own message begins is noted half a second before it
+        h["signals"] = [[f"o{n}", "objection", 10.0 * (n + 1) + 0.5, "s", None] for n in range(3)]
+        s = loop.score(self.k, h, events)
+        self.assertEqual((s["objected"], s["catch"], s["pays"]), (3, 1.0, True))
+        events += [turned(40 + n, True) for n in range(5)]
         s = loop.score(self.k, h, events)   # 5 wrong flags in 42: far over the bar
         self.assertEqual((s["turns"], s["objected"], s["pays"]), (45, 3, False))
+        old = [dict(kind="watched", habit=self.k, sid="s", turn=float(n), breaks=True) for n in range(40)]
+        self.assertEqual(loop.score(self.k, h, old)["turns"], 0)   # the per-act verdicts of before do not count
         h["guard"] = "on"
         (self.base / "aidetic/habits/live.json").write_text(json.dumps({"habits": {self.k: h}}))
-        path = fake_judge(self.bin, watch={"breaks": True, "why": "nobody said commit"})
-        r = self.run_gate("watch", payload=dict(session_id="s", tool_name="Bash", tool_input={"command": "git commit -m x"}),
-                          path=path)
-        reason = json.loads(r.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
-        self.assertIn("nobody said commit", reason)
-        e = reason.rsplit("gate event ", 1)[1].rstrip(")")
+        path = fake_judge(self.bin, turn={"rules": [{"id": self.k, "breaks": True, "why": "nobody said commit"}]},
+                          correction={"items": [dict(i=1, kind="none", habit="", act="other", quote="")]})
+        transcript = self.turn_transcript()
+        (self.base / "aidetic/state.json").write_text(json.dumps({"turns": {"s": time.time() - 30}}))
+        stop = dict(session_id="s", transcript_path=str(transcript), cwd="/home/u/p", last_assistant_message="Committed.")
+        r = self.run_gate("learn", payload=stop, path=path)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("Your last turn breaks a rule the user keeps", r.stderr)
+        self.assertIn("nobody said commit", r.stderr)
+        e = r.stderr.rsplit("gate event ", 1)[1].split(")")[0]
         self.assertEqual(self.run_gate("correct", e, "that", "commit", "was", "asked").returncode, 0)
-        self.assertEqual(self.run_gate("watch", payload=dict(session_id="s", tool_name="Read",
-                                                             tool_input={"file_path": "a"}), path=path).stdout, "")
+
+    def turn_transcript(self):
+        """A session: the user asks for a plan, says go through the question tool, and the turn commits."""
+        folder = self.base / "projects/-p"
+        folder.mkdir(parents=True, exist_ok=True)
+        t0 = time.time() - 60
+        at = lambda s: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0 + s))
+        q = question(option("Go"), option("Wait"))
+        lines = [{"type": "user", "timestamp": at(0), "message": {"content": "plan the fix, then wait for my go"}},
+                 {"type": "assistant", "timestamp": at(5), "message": {"content": [{"type": "text", "text": "Plan: …"}]}},
+                 {"type": "user", "timestamp": at(10), "message": {"content": "looks fine, ask me before you commit"}},
+                 {"type": "assistant", "timestamp": at(15), "message": {"content": [
+                     {"type": "tool_use", "name": "AskUserQuestion", "id": "q1", "input": {"questions": [q]}}]}},
+                 {"type": "user", "timestamp": at(20), "toolUseResult": {"questions": [q], "answers": {"Which way?": "Go"}},
+                  "message": {"content": [{"type": "tool_result", "tool_use_id": "q1", "content": "ok"}]}},
+                 {"type": "assistant", "timestamp": at(25), "message": {"content": [
+                     {"type": "tool_use", "name": "Read", "id": "r1", "input": {"file_path": "a.py"}},
+                     {"type": "tool_use", "name": "Bash", "id": "b1", "input": {"command": "git commit -m fix"}}]}}]
+        transcript = folder / "s.jsonl"
+        transcript.write_text("".join(json.dumps(x) + "\n" for x in lines))
+        return transcript
+
+    def test_one_call_judges_the_whole_turn_on_the_project_s_rules_with_all_the_user_wrote(self):
+        import loop
+        other = loop.blank("sends messages unasked", "message")
+        other.update(rule="I send nothing unasked.", guard="watch", scope=["elsewhere"])
+        own = loop.blank("I write tests first.", "other")
+        own.update(rule="I write tests first.", guard="off", own=True)
+        live = self.live()
+        live["habits"][self.k].update(rule="I commit only once the user has said to.", guard="watch")
+        live["habits"].update({"hother": other, "hown": own})
+        (self.base / "aidetic/habits/live.json").write_text(json.dumps(live))
+        seen = Path(self.bin) / "seen.txt"
+        reading = json.dumps({"structured_output": {"rules": [{"id": self.k, "breaks": False, "why": "the user said go"},
+                                                              {"id": "hother", "breaks": True, "why": "?"}]},
+                              "total_cost_usd": 0.01, "modelUsage": {"sonnet": {}}})
+        (Path(self.bin) / "claude").write_text(
+            "#!/bin/sh\ncase \"$*\" in\n"
+            f"  *'You read one turn'*) cat >>{seen}; echo '{reading}';;\n"
+            "  *'You read messages a user typed'*) cat >/dev/null; echo '" + json.dumps({"structured_output": {"items": [
+                dict(i=1, kind="none", habit="", act="other", quote="")]}, "total_cost_usd": 0, "modelUsage": {}}) + "';;\n"
+            "  *) exit 1;;\nesac\n")
+        (Path(self.bin) / "claude").chmod(0o755)
+        transcript = self.turn_transcript()
+        (self.base / "aidetic/state.json").write_text(json.dumps({"turns": {"s": time.time() - 30}}))
+        stop = dict(session_id="s", transcript_path=str(transcript), cwd="/home/u/p", last_assistant_message="Committed.")
+        r = self.run_gate("learn", payload=stop, path=f"{self.bin}:{os.environ['PATH']}")
+        self.assertEqual((r.returncode, r.stderr), (0, ""))   # watched, not on: nothing sent back
+        read = seen.read_text()
+        self.assertEqual(read.count("THE RULES:"), 1)   # one call for the turn
+        self.assertIn(f"[{self.k}] I commit only once the user has said to.", read)
+        self.assertNotIn("I send nothing unasked.", read)   # kept for another project
+        self.assertNotIn("I write tests first.", read)   # the user's own: not watched
+        self.assertIn("THE USER WROTE: plan the fix, then wait for my go", read)   # not only the last message
+        self.assertIn("THE USER ANSWERED “Which way?”: Go", read)   # an answer within the turn
+        self.assertIn('Bash: {"command": "git commit -m fix"}', read)   # every call, not the first of its kind
+        self.assertIn("THE REPLY THAT ENDED IT:\nCommitted.", read)
+        turned = [e for e in events(self.home) if e["kind"] == "watched_turn"]
+        self.assertEqual([(e["verdicts"], e["cost"]) for e in turned], [({self.k: [False, "the user said go"]}, 0.01)])
+
+    def test_a_rule_applies_where_the_user_kept_it_and_moves_when_they_say(self):
+        a, b = tempfile.mkdtemp(), tempfile.mkdtemp()   # two folders outside git: each its own project
+        name = lambda d: Path(d).name
+        start = lambda sid, cwd: json.loads(self.run_gate("start", payload={"session_id": sid, "cwd": cwd}).stdout or
+                                            '{"hookSpecificOutput": {"additionalContext": ""}}')["hookSpecificOutput"]["additionalContext"]
+        out = self.run_gate("rule", self.k, "accept", "--text", "I wait for go.", "--project", a).stdout
+        self.assertIn(f"kept (only in {name(a)}): I wait for go.", out)
+        self.assertIn(f"- I wait for go. (only in {name(a)})", (self.base / "aidetic/rules.md").read_text())
+        self.assertIn("I wait for go.", start("sa", a))
+        self.assertNotIn("I wait for go.", start("sb", b))
+        self.assertIn(f"applies only in {name(a)}, {name(b)}", self.run_gate("rule", self.k, "scope", b).stdout)
+        self.assertIn("I wait for go.", start("sb2", b))
+        self.assertIn("applies every project", self.run_gate("rule", self.k, "scope", "all").stdout)
+        added = subprocess.run([sys.executable, str(SRC / "choice_gate.py"), "rule", "add", "I", "write", "tests", "first.",
+                                "--here"], capture_output=True, text=True, cwd=b, env={**os.environ, "HOME": self.home})
+        self.assertIn(f"(only in {name(b)}): I write tests first.", added.stdout)
+        self.assertIn("I write tests first.", start("sb3", b))
+        self.assertNotIn("I write tests first.", start("sa3", a))
+        self.assertIn(f"own rule (only in {name(b)}), guard off", self.run_gate("rule", "list").stdout)
+        own = loop_id = [k for k, h in self.live()["habits"].items() if h.get("own")][0]
+        self.run_gate("rule", own, "drop")
+        self.assertNotIn(loop_id, self.live()["habits"])   # nothing but the rule: gone with it
+        self.assertEqual(self.run_gate("rule", self.k, "scope", "/no/such/folder").returncode, 1)
+
+    def test_a_running_session_is_handed_its_rules_again_only_when_they_change_for_its_project(self):
+        a, b = tempfile.mkdtemp(), tempfile.mkdtemp()
+        transcript = Path(self.home) / "t.jsonl"
+        transcript.write_text(json.dumps({"timestamp": "2000-01-01T00:00:00Z"}) + "\n")
+        prompt = lambda sid, cwd: self.run_gate("prompt", payload={"session_id": sid, "cwd": cwd,
+                                                                    "transcript_path": str(transcript)}).stdout
+        self.run_gate("rule", self.k, "accept", "--text", "I wait for go.")
+        self.run_gate("start", payload={"session_id": "sa", "cwd": a})
+        self.assertNotIn("Rules the user kept", prompt("sa", a))   # handed at start
+        added = subprocess.run([sys.executable, str(SRC / "choice_gate.py"), "rule", "add", "I", "ask", "first.",
+                                "--project", b], capture_output=True, text=True, env={**os.environ, "HOME": self.home})
+        self.assertEqual(added.returncode, 0, added.stderr)
+        self.assertNotIn("Rules the user kept", prompt("sa", a))   # a change for another project only
+        self.run_gate("rule", self.k, "scope", b)   # the rule leaves a
+        self.assertEqual(prompt("sa", a), "")   # none left to hand
+        self.run_gate("rule", self.k, "scope", "all")
+        handed = prompt("sa", a)
+        self.assertIn("as they now read for this project", handed)
+        self.assertIn("I wait for go.", handed)
+        self.assertNotIn("I ask first.", handed)
+        self.assertNotIn("Rules the user kept", prompt("sa", a))   # once
+
+
+class Scope(unittest.TestCase):
+    def git(self, cwd, *args):
+        subprocess.run(["git", "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True,
+                       capture_output=True)
+
+    def test_a_project_is_its_origin_else_its_repository_else_its_folder(self):
+        import scope
+        top = Path(tempfile.mkdtemp())
+        one, two, bare, plain = top / "one", top / "two", top / "bare", top / "plain"
+        for d in (one, two, bare, plain):
+            d.mkdir()
+        for d, url in ((one, "git@github.com:Owner/Repo.git"), (two, "https://user@github.com/Owner/Repo")):
+            self.git(str(d), "init", "-q")
+            self.git(str(d), "remote", "add", "origin", url)
+        self.git(str(bare), "init", "-q")
+        self.git(str(bare), "commit", "-q", "--allow-empty", "-m", "x")
+        self.git(str(bare), "worktree", "add", "-q", str(top / "wt"))
+        (one / "sub").mkdir()
+        self.assertEqual(scope.project(str(one / "sub")), "github.com/Owner/Repo")   # two clones, ssh and https: one
+        self.assertEqual(scope.project(str(two)), "github.com/Owner/Repo")
+        self.assertEqual(scope.project(str(top / "wt")), str(bare.resolve()))   # a worktree folds into its repository
+        self.assertEqual(scope.project(str(plain)), str(plain.resolve()))
+        self.assertEqual(scope.project(""), None)
+        self.assertEqual(scope.origin("ssh://git@host.example:2222/a/b.git", "/"), "host.example/a/b")
+        self.assertEqual(scope.name("github.com/Owner/Repo"), "Repo")
+
+
+class Pause(unittest.TestCase):
+    def test_after_a_failure_the_judge_pauses_and_a_success_ends_it(self):
+        bin_ = Path(tempfile.mkdtemp())
+        calls, fake = bin_ / "calls", bin_ / "claude"
+        fake.write_text(f"#!/bin/sh\ncat >/dev/null\necho x >>{calls}\nexit 1\n")
+        fake.chmod(0o755)
+        config, case = {"backend": "cli", "model": "sonnet"}, dict(input=dict(reply="I pick B."))
+        state = lambda: (ledger.read_state().get("judge_pause") or {}).get("reply")
+        ledger.with_state(lambda st: st.pop("judge_pause", None))
+        with unittest.mock.patch.dict(os.environ, {"PATH": f"{bin_}:{os.environ['PATH']}"}):
+            for _ in range(2):
+                with self.assertRaises(RuntimeError):
+                    judge.draw("reply", case, config)
+            self.assertEqual(len(calls.read_text().splitlines()), 1)   # the second never ran
+            self.assertEqual(state()["failures"], 1)
+            self.assertNotIn("question", ledger.read_state()["judge_pause"])   # the other tasks go on
+            with self.assertRaises(RuntimeError):
+                judge.draw("reply", case, config, pause=False)   # a run the user started is made anyway
+            self.assertEqual((len(calls.read_text().splitlines()), state()["failures"]), (2, 1))
+            ledger.with_state(lambda st: st["judge_pause"]["reply"].__setitem__("until", 0))
+            with self.assertRaises(RuntimeError):
+                judge.draw("reply", case, config)
+            self.assertEqual(state()["failures"], 2)
+            self.assertAlmostEqual(state()["until"] - time.time(), 2 * judge.PAUSE, delta=5)   # doubled
+            fake.write_text("#!/bin/sh\ncat >/dev/null\necho '" + json.dumps({"structured_output": {
+                "pick": False, "quote": ""}, "total_cost_usd": 0, "modelUsage": {}}) + "'\n")
+            ledger.with_state(lambda st: st["judge_pause"]["reply"].__setitem__("until", 0))
+            judge.draw("reply", case, config)
+            self.assertIsNone(state())
 
 
 if __name__ == "__main__":

@@ -16,16 +16,24 @@ Then it runs on its own:
 
 1. At the end of every turn it reads your newest message in the background; you never wait for it.
 2. On a habit's 2nd, 4th, 8th, 16th … signal, Claude asks you once whether to keep a short
-   rule for it, drafted from your own words. A habit about the subject of the work rather than how
-   Claude works with you, such as how a bot you are building should play its game, is not put to
-   you. Only you add a rule; declined, it is asked again when the count has doubled, and answered
-   "never", that habit is not asked about again.
-3. A kept rule is handed to every new session. A judge then watches the point where the habit
-   happens and records a verdict on each turn, deciding nothing.
+   rule for it, drafted from your own words, and says which projects the habit's signals came
+   from. You keep it for every project or only for the one you are in. A habit about the subject
+   of the work rather than how Claude works with you, such as how a bot you are building should
+   play its game, is not put to you. Only you add a rule; declined, it is asked again when the
+   count has doubled, and answered "never", that habit is not asked about again. You can also
+   write a rule of your own (`aidetic rule add`), and move any kept rule between projects later.
+3. A kept rule is handed to every new session in a project it applies to. At the end of each turn
+   one judge call then reads the whole turn, every tool call and the reply, against the rules kept
+   for that project, with everything you wrote in the session, your answers to questions included,
+   and records a verdict on each rule, deciding nothing. Your own rules are handed over, not
+   watched.
 4. A guard switches itself on only when its verdicts, set against your own later objections, clear
    fixed bars (at least 40 watched turns and 3 you objected to, two thirds of those caught, few
-   wrong flags), and off again when you correct it twice. It tells you in one line when it
-   switches.
+   wrong flags), and off again when you correct it twice. On, it sends a turn that breaks the rule
+   back to Claude. It tells you in one line when it switches.
+
+A project is known by its git remote `origin`, so the clones and worktrees of one repository share
+their rules; a repository without one by its main folder; a folder outside git by itself.
 
 **The choice rule and its gate.** When Claude asks you to choose, it shows each option as one
 concrete case with its facts sourced, says what each makes hard to undo, and puts its
@@ -35,8 +43,10 @@ background check sends back a pick written in prose instead of asked. The rule's
 
 **The judge.** Every check that reads language is done by a model, not by pattern matching, so it
 works in any language: through `claude -p` on your own login, or through Anthropic's API or any
-OpenAI-compatible one with a key. The repository also builds an evaluation set from your own
-transcripts and measures any judge against it.
+OpenAI-compatible one with a key. After a call fails, the hooks leave that task of the judge
+alone for a minute, then twice as long after each next failure in a row, up to an hour, so that a
+spent usage limit is not called at every hook; meanwhile the gate falls back to its patterns. The repository
+also builds an evaluation set from your own transcripts and measures any judge against it.
 
 ## Requirements
 
@@ -123,10 +133,9 @@ while `settings.json` names the gate (the entries of `src/hooks.json`), the plug
 the gate writes no settings entries of its own. To move from the settings hooks to the plugin,
 install the plugin, which stands down, check in `claude --debug` of a new session that its hooks
 run, remove those entries from `settings.json`, and check that a new session's turn start reaches
-`state.json`; if it does not, put the entries back. The loop's `watch` guard works there too: with
-no settings entries to carry it, accepting a rule keeps its points of action in
-`~/.claude/aidetic/watched.json`, which the plugin reads at each tool call. `aidetic hook` is for
-the settings hooks; the plugin carries `reply`.
+`state.json`; if it does not, put the entries back. The loop works there too, its turn judge
+included, from the plugin's Stop hook. `aidetic hook` is for the settings hooks; the plugin carries
+`reply`.
 
 To work on it: `claude --plugin-dir <clone>` loads it for one session, and `claude plugin test
 <clone>` runs `hooks/register.test.ts`.
@@ -138,7 +147,7 @@ To work on it: `claude --plugin-dir <clone>` loads it for one session, and `clau
 | `backend` | `cli` (`claude -p` on your login), `anthropic` or `openai` (an API key) |
 | `model`, `effort`, `timeout` | the judge's model, effort and seconds per call, for every task |
 | `key_env`, `base_url` | the variable holding the key, and the address of an OpenAI-compatible server |
-| `decide` | the tasks the judge decides, each with its own options: `question`, `reply`, `undone`, `learn`, `habits` |
+| `decide` | the tasks the judge decides, each with its own options: `question`, `reply`, `undone`, `learn` (the loop: reading your messages, drafting rules, judging turns), `habits` |
 | `off_arm` | the share of new sessions run without the choice rule and its gate; `1` turns them off for every session, while the ledger, the habits loop and your kept rules go on |
 | `shadow` | `true` runs the judge beside the patterns and records what it would decide |
 
@@ -150,8 +159,10 @@ To work on it: `claude --plugin-dir <clone>` loads it for one session, and `clau
 | `aidetic recent`, `aidetic reversals` | the latest answers, and the picks undone in their own session |
 | `aidetic habits [--days N]` | your habits, what you objected to and forewarned, and whether a guard could pay |
 | `aidetic habits show N` | your own words for habit N |
-| `aidetic rule list` | every habit the loop knows, its signals, its rule and its guard |
-| `aidetic rule ID accept [--text …]`, `decline`, `never`, `drop` | your answer to a proposed rule, run by Claude |
+| `aidetic rule list` | every habit the loop knows, its signals, its rule, where the rule applies and its guard |
+| `aidetic rule ID accept [--text …] [--here \| --project PATH]`, `decline`, `never`, `drop` | your answer to a proposed rule, run by Claude; `--here` or `--project` keeps it for that project only |
+| `aidetic rule ID scope all \| here \| PATH` | where a kept rule applies: `all` puts it in every project; `here` or a folder adds that project to a rule kept for some, or limits one kept for every project to it |
+| `aidetic rule add "…" [--here \| --project PATH]` | a rule of your own, kept at once, for every project or the one named; handed over, never watched |
 | `aidetic correct ID "…"` | a denial, send-back or guard decision you say was wrong, in your words |
 | `aidetic arms` | the off arm against the on arm, when `off_arm` is between 0 and 1 |
 | `aidetic install` | the whole setup again, after an update; only what is missing or differs changes |
@@ -161,15 +172,16 @@ To work on it: `claude --plugin-dir <clone>` loads it for one session, and `clau
 
 Everything about you stays in `~/.claude/aidetic`, never in the repository: the ledger
 (`events.jsonl`, `state.json`), `judge.json`, the evaluation set (`eval/`), the habits' readings
-and state (`habits/`), the rules you kept (`rules.md`) and, under the plugin, the points where a
-habit is watched (`watched.json`). These files quote your work, so do not commit or share them.
+and state (`habits/`, where `live.json` holds each habit, its rule and where that applies), and
+`rules.md`, every rule you kept with where it applies, for you to read: each session is handed only
+the ones for its project. These files quote your work, so do not commit or share them.
 
 ## Turning it off
 
 - The choice rule and its gate: `"off_arm": 1` in `judge.json`.
 - The loop, on the settings hooks: remove the `learn` entry from the `Stop` hooks in
-  `~/.claude/settings.json`. Dropping your last rule (`aidetic rule ID drop`) also takes out the
-  `watch` hook it added.
+  `~/.claude/settings.json`. Dropping a rule (`aidetic rule ID drop`) stops it being handed over
+  and judged.
 - The background reply check, on the settings hooks: `aidetic hook --off`.
 - All of it, on the settings hooks: remove the entries of `src/hooks.json` from `settings.json`.
   Every hook fails open, so a broken or missing clone never blocks your work.

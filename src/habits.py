@@ -99,9 +99,10 @@ def render(batch):
     return "\n\n".join(parts)
 
 
-def read(batch, config):
-    """One reading of a batch of messages; a message the reading leaves out is read again next time."""
-    reading, _ = judge.draw("correction", dict(input=dict(text=render(batch))), config)
+def read(batch, config, pause=True):
+    """One reading of a batch of messages; a message the reading leaves out is read again next time.
+    pause: as judge.draw() has it; the run the user starts reads whatever the hooks' pause."""
+    reading, _ = judge.draw("correction", dict(input=dict(text=render(batch))), config, pause)
     by = {r["i"]: r for r in reading["items"]}
     return [dict(id=m["id"], v=judge.version("correction"), judge=judge.key(config), at=m["t"], sid=m["sid"],
                  project=m["project"], kind=by[n]["kind"], habit=by[n]["habit"], act=by[n]["act"],
@@ -121,7 +122,7 @@ def group(found, config):
         pass
     text = "\n".join(" | ".join(x[k] for k in ("id", "kind", "act", "habit", "quote")) for x in items)
     config = {**config, "timeout": max(config.get("timeout", 60), GROUP_SECS)}   # one draw over every item
-    reading, _ = judge.draw("habits", dict(input=dict(text=text)), config)
+    reading, _ = judge.draw("habits", dict(input=dict(text=text)), config, pause=False)   # only `aidetic habits` groups
     groups, placed = [], set()
     for g in reading["groups"]:
         ids = [i for i in g["ids"] if i in {x["id"] for x in items} and i not in placed]
@@ -179,7 +180,7 @@ def main(args):
     DIR.mkdir(parents=True, exist_ok=True)
     failed = 0
     with ThreadPoolExecutor(jobs) as pool:
-        for n, fut in enumerate(as_completed([pool.submit(read, b, config) for b in batches])):
+        for n, fut in enumerate(as_completed([pool.submit(read, b, config, False) for b in batches])):
             try:
                 rows = fut.result()
                 append(READINGS, rows)

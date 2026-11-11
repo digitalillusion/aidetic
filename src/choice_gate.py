@@ -11,10 +11,12 @@ Python exits 2 when the script is missing, and a PreToolUse hook that exits 2 bl
 The one that does not, `reply`, must exit 2 to send a reply back; it runs after the turn has ended,
 so a missing script blocks nothing there, and Claude Code reports it once as a broken hook.
 
-  start    SessionStart: hand RULE.md to the session. With `"off_arm": SHARE` in judge.json,
+  start    SessionStart: hand RULE.md to the session, and the rules the user kept that apply to its
+           project (loop.kept(), scope.py). With `"off_arm": SHARE` in judge.json,
            that share of new sessions is put in the off arm instead: no rule,
            and no hook below decides anything there, while the ledger records as before; at 1,
-           every session is off, those already running included
+           every session is off, those already running included; the kept rules are handed in
+           either arm
   pre      PreToolUse on AskUserQuestion: deny a question that fails the rule's checks
            (questions.py), among them a `read:` tag citing a file the session never opened
            (transcripts.py); the third identical attempt goes through. With `"decide":
@@ -22,7 +24,8 @@ so a missing script blocks nothing there, and Claude Code reports it once as a b
            decide only when it cannot
   post     PostToolUse on AskUserQuestion: record the answer against the recommendation
   prompt   UserPromptSubmit: note when the turn began; hand RULE.md, once per change, to a
-           session that began before its last change
+           session that began before its last change, and the kept rules once they change for the
+           session's project
   stop     Stop: send back, once, a reply that names its pick in prose when nothing was asked
            through the tool since the turn began; once `aidetic hook` has installed `reply`, the
            patterns send nothing back
@@ -37,11 +40,8 @@ so a missing script blocks nothing there, and Claude Code reports it once as a b
            read the past four weeks (`habits`) while no habit is known
            `install --plugin` leaves settings.json alone, the plugin carrying the hooks, and does the rest
   learn    Stop, in the background (`asyncRewake`): the loop of loop.py reads the turn's new
-           messages, and wakes the session to propose a rule, send a guarded reply back or report
-           a guard switched
-  watch    PreToolUse, written into settings.json only while a habit is watched at that point of
-           action: the loop's verdict on an act, or its guard's decision; under the plugin, which
-           has no settings entries, those points of action are in watched.json
+           messages and judges the turn against the rules watched in its project, and wakes the
+           session to propose a rule, send a guarded turn back or report a guard switched
 
 With `"shadow": true` in ~/.claude/aidetic/judge.json, pre and stop also hand each question and
 each turn end to the judge (judge.py) in a detached process, `shadow FILE`, which records its
@@ -54,8 +54,10 @@ verdict as a `judged` event and decides nothing.
            asked and was let through (missed), in their words (RULE.md)
   habits [--days N] [show N]     which of the user's corrections of Claude recur, and whether a
            guard where each happens could pay (habits.py)
-  rule [list] | rule ID accept [--text TEXT] | decline | never | drop      the user's answer to a rule the
-           loop proposed, run by Claude (loop.py)
+  rule [list] | rule ID accept [--text TEXT] [--here | --project PATH] | decline | never | drop
+       | rule ID scope all|here|PATH | rule add TEXT [--here | --project PATH]
+           the user's answer to a rule the loop proposed, where a kept rule applies, or a rule of
+           their own, run by Claude (loop.py)
 
 Every hook fails open: a bug here must never stop a question from being asked.
 """
@@ -121,11 +123,39 @@ def start(p):
     if new:
         ledger.emit(kind="arm", phase="gate", src="hook", sid=sid, arm=which, source=p.get("source"),
                     cwd=p.get("cwd"))
+    rules = kept_rules(p.get("cwd"))
+    if rules is not None:
+        ledger.with_state(lambda state: handed(state, sid, rules))
     parts = ([STANDING + ledger.RULES.read_text()] if which != "off" and ledger.RULES.exists() else []) \
-        + ([KEPT + ledger.KEPT.read_text()] if ledger.KEPT.exists() else [])
+        + ([KEPT + rules] if rules else [])
     if parts:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                  "additionalContext": "\n\n".join(parts)}}))
+
+
+def kept_rules(cwd):
+    """The kept rules that apply in the session's project (loop.kept()); None when the loop cannot
+    load or read them, which hands the session none rather than stopping the hook."""
+    try:
+        import loop
+        import scope
+        return loop.kept(scope.project(cwd))
+    except Exception:
+        return None
+
+
+def digest(text):
+    return hashlib.sha1(text.encode()).hexdigest()[:12]
+
+
+def handed(state, sid, rules):
+    """Note which kept rules the session now has; returns what it had before, None if unknown."""
+    seen = state.setdefault("kept_seen", {})
+    had = seen.pop(sid, None)
+    seen[sid] = digest(rules)
+    for old in list(seen)[:-500]:
+        del seen[old]
+    return had
 
 
 def pre(p):
@@ -247,31 +277,34 @@ def prompt(p):
         return
     ledger.with_state(lambda state: began_turn(state, sid))
     began, parts = started(p.get("transcript_path")), []
-    for path, seen_key, applies, words in (
-            (ledger.RULES, "injected", arm(sid) != "off",
-             "Standing instruction of the user's, from their aidetic setup, in its current form (it "
-             "changed after this session began); follow it from now on:\n\n"),
-            (ledger.KEPT, "injected_kept", True,
-             "Rules the user kept, from their aidetic setup, as they now read (they changed after this "
-             "session began); follow them from now on:\n\n")):
-        if not applies or not path.exists():
-            continue
-        mtime = path.stat().st_mtime
-        if began is None or began >= mtime:
-            continue   # the session was handed the file at start; a first prompt finds no transcript line yet
+    if arm(sid) != "off" and ledger.RULES.exists():
+        mtime = ledger.RULES.stat().st_mtime
+        if began is not None and began < mtime:   # else handed at start; a first prompt finds no transcript line yet
 
-        def claim(state, key=seen_key, mtime=mtime):
-            seen = state.setdefault(key, {})
-            if seen.get(sid, -1) >= mtime:
-                return False
-            seen[sid] = mtime
-            for old in sorted(seen, key=seen.get)[:-500]:
-                del seen[old]
-            return True
+            def claim(state):
+                seen = state.setdefault("injected", {})
+                if seen.get(sid, -1) >= mtime:
+                    return False
+                seen[sid] = mtime
+                for old in sorted(seen, key=seen.get)[:-500]:
+                    del seen[old]
+                return True
 
-        if ledger.with_state(claim):
-            ledger.emit(kind="rule_injected", phase="gate", src="hook", sid=sid, file=path.name)
-            parts.append(words + path.read_text())
+            if ledger.with_state(claim):
+                ledger.emit(kind="rule_injected", phase="gate", src="hook", sid=sid, file=ledger.RULES.name)
+                parts.append("Standing instruction of the user's, from their aidetic setup, in its current form (it "
+                             "changed after this session began); follow it from now on:\n\n" + ledger.RULES.read_text())
+    rules = kept_rules(p.get("cwd"))
+    if rules is not None:
+        had = ledger.with_state(lambda state: handed(state, sid, rules))
+        if had is None:   # a session begun before its rules were noted: by when rules.md last changed
+            changed = (began is not None and ledger.KEPT.exists() and began < ledger.KEPT.stat().st_mtime)
+        else:
+            changed = had != digest(rules)
+        if changed and rules:
+            ledger.emit(kind="rule_injected", phase="gate", src="hook", sid=sid, file=ledger.KEPT.name)
+            parts.append("Rules the user kept, from their aidetic setup, as they now read for this project (they "
+                         "changed after this session began); follow them from now on:\n\n" + rules)
     if parts:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                                  "additionalContext": "\n\n".join(parts)}}))
@@ -335,13 +368,7 @@ def learn(p):
     return loop.learn(p)
 
 
-def watch(p):
-    import loop
-    return loop.watch(p)
-
-
 SETTINGS = ledger.HOME / ".claude" / "settings.json"
-WATCHED = ledger.DIR / "watched.json"   # the matchers of `watch` for the plugin, which has no settings entries
 REPLY_HOOK = {"asyncRewake": True, "timeout": 120, "rewakeSummary": "aidetic sent the reply back",
               "rewakeMessage": "The user's aidetic gate sent your last reply back:"}
 
@@ -404,43 +431,6 @@ def settings_carry_gate():
         return False
 
 
-def write_watched(matchers):
-    """The plugin's `watch` hook reads these at each tool call. Written beside and renamed over."""
-    text = json.dumps(matchers) + "\n"
-    if WATCHED.exists() and WATCHED.read_text() == text:
-        return False
-    WATCHED.parent.mkdir(parents=True, exist_ok=True)
-    tmp = WATCHED.with_suffix(".json.aidetic-tmp")
-    tmp.write_text(text)
-    tmp.replace(WATCHED)
-    return True
-
-
-def write_watch(acts):
-    """The PreToolUse entries of `watch` in settings.json: one for each point of action a habit is
-    watched at (loop.MATCHERS), none when no habit is. With the plugin carrying the gate, no entry in
-    settings.json, which would stand it down: the matchers go to watched.json. Returns whether the
-    file changed."""
-    import loop
-    if not settings_carry_gate():
-        return write_watched(list(dict.fromkeys(loop.MATCHERS[a] for a in acts)))
-    settings = json.loads(SETTINGS.read_text()) if SETTINGS.exists() else {}
-    pres = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
-    before = json.dumps(pres, sort_keys=True)
-    mine = lambda h: (h.get("command") or "").split(" || ")[0].endswith("choice_gate.py watch")
-    for entry in pres:
-        entry["hooks"] = [h for h in entry.get("hooks", []) if not mine(h)]
-    pres[:] = [e for e in pres if e.get("hooks")]
-    gate = gate_command(settings["hooks"].get("Stop", []))
-    for matcher in dict.fromkeys(loop.MATCHERS[a] for a in acts):
-        pres.append({"matcher": matcher, "hooks": [{"type": "command", "command": f"{gate} watch || true",
-                                                    "timeout": 90}]})
-    if json.dumps(pres, sort_keys=True) == before:
-        return False
-    save_settings(settings)
-    return True
-
-
 def install_hook(args):
     if not settings_carry_gate():
         sys.exit("aidetic hook: the plugin carries `reply`; `claude plugin disable aidetic` turns it off")
@@ -486,9 +476,19 @@ def install(args):
             if not placed:
                 have.append({**{k: v for k, v in entry.items() if k != "hooks"}, "hooks": [h]})
             put.append(sub)
-    if put:
+    old = lambda x: (x.get("command") or "").split(" || ")[0].endswith("choice_gate.py watch")
+    pres = [] if plugin else hooks.get("PreToolUse", [])
+    dropped = any(old(x) for e in pres for x in e.get("hooks", []))
+    if dropped:   # the per-act `watch` entries of earlier versions: the turn judge in `learn` replaced them
+        for e in pres:
+            e["hooks"] = [x for x in e.get("hooks", []) if not old(x)]
+        pres[:] = [e for e in pres if e.get("hooks")]
+    (ledger.DIR / "watched.json").unlink(missing_ok=True)   # the plugin's copy of those entries
+    if put or dropped:
         SETTINGS.parent.mkdir(parents=True, exist_ok=True)
         save_settings(settings)
+    if dropped:
+        print(f"hooks: the per-act `watch` entries taken out of {SETTINGS}; the loop now judges each turn at its end")
     if plugin:   # two carriers of one gate record every event twice: the plugin stands down while settings name it
         print(f"hooks: {SETTINGS} still names the gate, so the plugin stands down until those entries are removed"
               if "choice_gate.py" in json.dumps(hooks) else f"hooks: the plugin's own; {SETTINGS} left as it is")
@@ -568,7 +568,7 @@ def run_shadow(path):
 
 
 HOOKS = {"start": start, "pre": pre, "post": post, "prompt": prompt, "stop": stop, "reply": reply,
-         "learn": learn, "watch": watch}
+         "learn": learn}
 
 
 def main():
@@ -586,9 +586,9 @@ def main():
         import habits
         habits.main(args)
         return
-    if cmd in ("rule", "watched"):
+    if cmd == "rule":
         import loop
-        loop.rule(args) if cmd == "rule" else loop.watched(args[0])
+        loop.rule(args)
         return
     import report   # the hooks never load the transcript scan
     commands = {"stats": report.stats, "recent": report.recent, "reversals": report.reversals,
